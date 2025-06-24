@@ -1,0 +1,366 @@
+<?php
+/**
+ * Plugin Name: Yeison Widget Headers Fixer v3
+ * Description: Sistema crítico de headers para iframe Bitrix24 (MU-Plugin)
+ * Version: 3.0
+ * Must Use: true
+ * Author: Yeison Dev
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * SISTEMA CRÍTICO DE HEADERS PARA IFRAME BITRIX24
+ * Este MU-Plugin se ejecuta ANTES que todos los plugins y es esencial
+ * para que el widget funcione correctamente en iframe de Bitrix24
+ */
+class Yeison_Widget_Headers_Critical_Fixer {
+    
+    private static $instance = null;
+    private $is_widget_request = false;
+    
+    public function __construct() {
+        // Detectar inmediatamente si es widget
+        $this->detect_widget_request();
+        
+        if ($this->is_widget_request) {
+            // MÁXIMA PRIORIDAD - hooks tempranos
+            add_action('muplugins_loaded', array($this, 'force_headers'), -10000);
+            add_action('plugins_loaded', array($this, 'force_headers'), -10000);
+            add_action('init', array($this, 'force_headers'), -10000);
+            add_action('wp_loaded', array($this, 'force_headers'), -10000);
+            add_action('template_redirect', array($this, 'force_headers'), -10000);
+            add_action('send_headers', array($this, 'force_headers'), -10000);
+            add_action('wp', array($this, 'force_headers'), -10000);
+            
+            // Filtros críticos
+            add_filter('wp_headers', array($this, 'filter_headers'), 99999);
+            
+            // Buffer de salida
+            add_action('init', array($this, 'start_buffer'), -10000);
+            
+            // Deshabilitar cache inmediatamente
+            $this->disable_cache_immediately();
+            
+            // Log de debug
+            $this->log_debug('🎯 Widget detectado - MU-Plugin activado');
+        }
+    }
+    
+    public static function get_instance() {
+        if (null === self::$instance) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+    
+    /**
+     * Detectar si es widget de forma ultra-rápida
+     */
+    private function detect_widget_request() {
+        $request_uri = $_SERVER['REQUEST_URI'] ?? '';
+        $query_string = $_SERVER['QUERY_STRING'] ?? '';
+        $referer = $_SERVER['HTTP_REFERER'] ?? '';
+        $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        
+        $indicators = array(
+            // Parámetros GET críticos
+            isset($_GET['yeison_widget']),
+            isset($_GET['yeison_widget_autologin']),
+            
+            // URL patterns
+            strpos($request_uri, 'yeison') !== false,
+            strpos($request_uri, 'yeison-btx-widget') !== false,
+            strpos($query_string, 'yeison_widget') !== false,
+            
+            // Referer de Bitrix24
+            strpos($referer, 'bitrix24') !== false,
+            strpos($referer, '.bitrix24.') !== false,
+            
+            // User Agent de Bitrix24
+            strpos($user_agent, 'Bitrix') !== false,
+            
+            // Headers específicos de Bitrix24
+            isset($_SERVER['HTTP_X_BITRIX_FRAME']),
+            isset($_SERVER['HTTP_BX_AJAX']),
+            
+            // Parámetros POST/REQUEST de Bitrix24
+            isset($_REQUEST['DOMAIN']) && strpos($_REQUEST['DOMAIN'], 'bitrix24') !== false,
+            isset($_REQUEST['PLACEMENT']),
+            isset($_REQUEST['APP_SID']),
+            
+            // REST API del widget
+            strpos($request_uri, 'wp-json/yeison-btx-widget') !== false,
+            
+            // AJAX del widget
+            strpos($request_uri, 'admin-ajax.php') !== false && (
+                strpos($query_string, 'yeison_btx_widget') !== false ||
+                isset($_POST['action']) && strpos($_POST['action'], 'yeison') !== false
+            )
+        );
+        
+        $this->is_widget_request = in_array(true, $indicators);
+        
+        return $this->is_widget_request;
+    }
+    
+    /**
+     * Forzar headers críticos para iframe
+     */
+    public function force_headers() {
+        if (!$this->is_widget_request) {
+            return;
+        }
+        
+        // Verificar si headers ya se enviaron
+        if (headers_sent($file, $line)) {
+            $this->log_debug("❌ Headers ya enviados en {$file}:{$line}");
+            return;
+        }
+        
+        // MÉTODO 1: Limpiar headers conflictivos
+        if (function_exists('header_remove')) {
+            header_remove('X-Frame-Options');
+            header_remove('Content-Security-Policy');
+            header_remove('X-Content-Type-Options');
+            header_remove('Cache-Control');
+            header_remove('Pragma');
+            header_remove('Expires');
+        }
+        
+        // MÉTODO 2: Establecer headers para iframe - FORZADO
+        header('X-Frame-Options: ALLOWALL', true);
+        header('Content-Security-Policy: frame-ancestors *', true);
+        header('Access-Control-Allow-Origin: *', true);
+        header('Access-Control-Allow-Methods: GET, POST, OPTIONS', true);
+        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-WP-Nonce', true);
+        header('Access-Control-Allow-Credentials: false', true);
+        header('Cache-Control: no-cache, no-store, must-revalidate, private', true);
+        header('Pragma: no-cache', true);
+        header('Expires: 0', true);
+        
+        // Headers adicionales para iframe estable
+        header('Referrer-Policy: no-referrer-when-downgrade', true);
+        header('Permissions-Policy: frame-src *, iframe-src *', true);
+        
+        $this->log_debug('✅ Headers críticos establecidos');
+    }
+    
+    /**
+     * Filtrar headers de WordPress
+     */
+    public function filter_headers($headers) {
+        if (!$this->is_widget_request) {
+            return $headers;
+        }
+        
+        // SOBREESCRIBIR completamente los headers problemáticos
+        $widget_headers = array(
+            'X-Frame-Options' => 'ALLOWALL',
+            'Content-Security-Policy' => 'frame-ancestors *',
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Methods' => 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers' => 'Content-Type, Authorization, X-Requested-With, X-WP-Nonce',
+            'Access-Control-Allow-Credentials' => 'false',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate, private',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
+            'Referrer-Policy' => 'no-referrer-when-downgrade'
+        );
+        
+        // Mergear con headers existentes (los nuestros tienen prioridad)
+        $headers = array_merge($headers, $widget_headers);
+        
+        // Eliminar headers que pueden causar problemas
+        unset($headers['X-Content-Type-Options']);
+        
+        $this->log_debug('🔄 Headers filtrados por MU-Plugin');
+        
+        return $headers;
+    }
+    
+    /**
+     * Buffer de salida para última oportunidad
+     */
+    public function start_buffer() {
+        if ($this->is_widget_request) {
+            ob_start(array($this, 'modify_buffer'));
+        }
+    }
+    
+    public function modify_buffer($buffer) {
+        // Última oportunidad para establecer headers
+        if (!headers_sent()) {
+            header_remove('X-Frame-Options');
+            header('X-Frame-Options: ALLOWALL', true);
+            header('Content-Security-Policy: frame-ancestors *', true);
+            header('Access-Control-Allow-Origin: *', true);
+            header('Cache-Control: no-cache, no-store, must-revalidate', true);
+            
+            $this->log_debug('🔄 Headers forzados desde buffer final');
+        }
+        
+        return $buffer;
+    }
+    
+    /**
+     * Deshabilitar cache inmediatamente
+     */
+    private function disable_cache_immediately() {
+        // Constantes para deshabilitar todos los tipos de cache
+        if (!defined('DONOTCACHEPAGE')) define('DONOTCACHEPAGE', true);
+        if (!defined('DONOTCACHEDB')) define('DONOTCACHEDB', true);
+        if (!defined('DONOTMINIFY')) define('DONOTMINIFY', true);
+        if (!defined('DONOTCDN')) define('DONOTCDN', true);
+        if (!defined('DONOTCACHEOBJECT')) define('DONOTCACHEOBJECT', true);
+        
+        // LiteSpeed Cache
+        if (!defined('LSCACHE_NO_CACHE')) define('LSCACHE_NO_CACHE', true);
+        
+        // WP Cache
+        if (!defined('WP_CACHE')) define('WP_CACHE', false);
+        
+        // W3 Total Cache
+        if (!defined('W3TC_DYNAMIC_SECURITY')) define('W3TC_DYNAMIC_SECURITY', md5(time()));
+        
+        // WP Super Cache
+        if (!defined('WPSC_BYPASS_CACHE')) define('WPSC_BYPASS_CACHE', true);
+        
+        // WP Rocket
+        if (!defined('DONOTROCKETOPTIMIZE')) define('DONOTROCKETOPTIMIZE', true);
+        
+        // Autoptimize
+        if (!defined('AUTOPTIMIZE_NO_AGGREGATION')) define('AUTOPTIMIZE_NO_AGGREGATION', true);
+        
+        // Cache personalizado
+        if (!defined('CACHE_EXCLUDE_COOKIES')) define('CACHE_EXCLUDE_COOKIES', 'yeison_widget');
+        
+        $this->log_debug('🚫 Cache deshabilitado para widget');
+    }
+    
+    /**
+     * Sistema de logging simple pero efectivo
+     */
+    private function log_debug($message) {
+        $log_file = WP_CONTENT_DIR . '/yeison-widget-mu-debug.log';
+        $timestamp = date('Y-m-d H:i:s');
+        $uri = $_SERVER['REQUEST_URI'] ?? '';
+        $referer = substr($_SERVER['HTTP_REFERER'] ?? '', 0, 50);
+        $user_agent = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 50);
+        
+        $log_entry = sprintf(
+            "[%s] %s | URI: %s | Referer: %s | UA: %s\n",
+            $timestamp,
+            $message,
+            $uri,
+            $referer,
+            $user_agent
+        );
+        
+        // Escribir log de forma segura
+        if (is_writable(dirname($log_file))) {
+            file_put_contents($log_file, $log_entry, FILE_APPEND | LOCK_EX);
+        }
+    }
+}
+
+/**
+ * HOOK ULTRA-TEMPRANO para capturar headers inmediatamente
+ */
+if (!function_exists('yeison_ultra_early_headers_critical')) {
+    function yeison_ultra_early_headers_critical() {
+        $is_widget = (
+            isset($_GET['yeison_widget']) ||
+            isset($_GET['yeison_widget_autologin']) ||
+            strpos($_SERVER['REQUEST_URI'] ?? '', 'yeison') !== false ||
+            strpos($_SERVER['HTTP_REFERER'] ?? '', 'bitrix24') !== false ||
+            strpos($_SERVER['QUERY_STRING'] ?? '', 'yeison_widget') !== false
+        );
+        
+        if ($is_widget && !headers_sent()) {
+            // Headers críticos inmediatos
+            header('X-Frame-Options: ALLOWALL', true);
+            header('Content-Security-Policy: frame-ancestors *', true);
+            header('Access-Control-Allow-Origin: *', true);
+            header('Cache-Control: no-cache, no-store, must-revalidate', true);
+            
+            // Log inmediato
+            error_log('[Yeison MU-Plugin] Headers ultra-tempranos aplicados: ' . ($_SERVER['REQUEST_URI'] ?? ''));
+        }
+    }
+}
+
+/**
+ * PREVENIR que otros plugins sobreescriban headers
+ */
+add_action('wp_loaded', function() {
+    if (isset($_GET['yeison_widget']) || 
+        isset($_GET['yeison_widget_autologin']) ||
+        strpos($_SERVER['REQUEST_URI'] ?? '', 'yeison') !== false) {
+        
+        // Remover acciones que puedan agregar headers conflictivos
+        remove_action('send_headers', 'wp_cors_headers');
+        remove_action('send_headers', 'send_frame_options_header');
+        remove_action('template_redirect', 'wp_cors_headers');
+        
+        // Filtro de última instancia para headers
+        add_filter('wp_headers', function($headers) {
+            if (isset($headers['X-Frame-Options']) && $headers['X-Frame-Options'] !== 'ALLOWALL') {
+                $headers['X-Frame-Options'] = 'ALLOWALL';
+            }
+            return $headers;
+        }, 99999);
+        
+        error_log('[Yeison MU-Plugin] Protecciones anti-override activadas');
+    }
+}, -10000);
+
+// ============================================================================
+// INICIALIZACIÓN INMEDIATA
+// ============================================================================
+
+// Hook ultra-temprano
+add_action('muplugins_loaded', 'yeison_ultra_early_headers_critical', -20000);
+
+// Inicializar la clase principal inmediatamente
+Yeison_Widget_Headers_Critical_Fixer::get_instance();
+
+// ============================================================================
+// FUNCIONES DE UTILIDAD GLOBAL
+// ============================================================================
+
+/**
+ * Función para verificar si estamos en contexto de widget
+ */
+if (!function_exists('is_yeison_widget_request')) {
+    function is_yeison_widget_request() {
+        return (
+            isset($_GET['yeison_widget']) ||
+            isset($_GET['yeison_widget_autologin']) ||
+            strpos($_SERVER['REQUEST_URI'] ?? '', 'yeison') !== false ||
+            strpos($_SERVER['HTTP_REFERER'] ?? '', 'bitrix24') !== false
+        );
+    }
+}
+
+/**
+ * Función para forzar headers en cualquier momento
+ */
+if (!function_exists('yeison_force_iframe_headers_now')) {
+    function yeison_force_iframe_headers_now() {
+        if (!headers_sent() && is_yeison_widget_request()) {
+            header('X-Frame-Options: ALLOWALL', true);
+            header('Content-Security-Policy: frame-ancestors *', true);
+            header('Access-Control-Allow-Origin: *', true);
+            header('Cache-Control: no-cache, no-store, must-revalidate', true);
+            return true;
+        }
+        return false;
+    }
+}
+
+// ============================================================================
+// FIN MU-PLUGIN YEISON WIDGET HEADERS
+// ============================================================================

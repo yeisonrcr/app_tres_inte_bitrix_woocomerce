@@ -1,0 +1,176 @@
+# BEGIN LSCACHE
+## LITESPEED WP CACHE PLUGIN - Do not edit the contents of this block! ##
+<IfModule LiteSpeed>
+RewriteEngine on
+CacheLookup on
+RewriteRule .* - [E=Cache-Control:no-autoflush]
+RewriteRule \.litespeed_conf\.dat - [F,L]
+
+### marker CACHE RESOURCE start ###
+RewriteRule wp-content/.*/[^/]*(responsive|css|js|dynamic|loader|fonts)\.php - [E=cache-control:max-age=3600]
+### marker CACHE RESOURCE end ###
+
+### marker FAVICON start ###
+RewriteRule favicon\.ico$ - [E=cache-control:max-age=86400]
+### marker FAVICON end ###
+
+### marker WEBP start ###
+RewriteCond %{HTTP_ACCEPT} "image/webp"
+RewriteRule .* - [E=Cache-Control:vary=%{ENV:LSCACHE_VARY_VALUE}+webp]
+RewriteCond %{HTTP_USER_AGENT} iPhone.*Version/(\d{2}).*Safari
+RewriteCond %1 >13
+RewriteRule .* - [E=Cache-Control:vary=%{ENV:LSCACHE_VARY_VALUE}+webp]
+### marker WEBP end ###
+
+### marker DROPQS start ###
+CacheKeyModify -qs:fbclid
+CacheKeyModify -qs:gclid
+CacheKeyModify -qs:utm*
+CacheKeyModify -qs:_ga
+### marker DROPQS end ###
+
+</IfModule>
+## LITESPEED WP CACHE PLUGIN - Do not edit the contents of this block! ##
+# END LSCACHE
+# BEGIN NON_LSCACHE
+## LITESPEED WP CACHE PLUGIN - Do not edit the contents of this block! ##
+## LITESPEED WP CACHE PLUGIN - Do not edit the contents of this block! ##
+# END NON_LSCACHE
+
+# BEGIN WordPress
+# Las directivas (líneas) entre «BEGIN WordPress» y «END WordPress» son
+# generadas dinámicamente y solo deberían ser modificadas mediante filtros de WordPress.
+# Cualquier cambio en las directivas que hay entre esos marcadores serán sobrescritas.
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+
+# END WordPress
+
+
+
+# SECCIÓN CRÍTICA: Headers para Bitrix24 Widget
+<IfModule mod_headers.c>
+    # Detectar peticiones de widget Bitrix24 (más específico)
+    SetEnvIf Request_URI "yeison" BITRIX_WIDGET
+    SetEnvIf Query_String "yeison_widget" BITRIX_WIDGET
+    SetEnvIf Query_String "yeison_autologin" BITRIX_WIDGET
+    SetEnvIf Query_String "source=bitrix24" BITRIX_WIDGET
+    SetEnvIf Query_String "in_iframe=1" BITRIX_WIDGET
+    SetEnvIf HTTP_REFERER "bitrix24" BITRIX_WIDGET
+    SetEnvIf HTTP_USER_AGENT "Bitrix" BITRIX_WIDGET
+    
+    # FORZAR remoción de X-Frame-Options para widgets
+    Header always unset X-Frame-Options env=BITRIX_WIDGET
+    Header always unset Content-Security-Policy env=BITRIX_WIDGET
+    Header always unset X-Content-Type-Options env=BITRIX_WIDGET
+    
+    # Establecer headers específicos para widgets (FORZAR)
+    Header always set X-Frame-Options "ALLOWALL" env=BITRIX_WIDGET
+    Header always set Content-Security-Policy "frame-ancestors *" env=BITRIX_WIDGET
+    Header always set Access-Control-Allow-Origin "*" env=BITRIX_WIDGET
+    Header always set Access-Control-Allow-Methods "GET, POST, OPTIONS" env=BITRIX_WIDGET
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With" env=BITRIX_WIDGET
+    Header always set Cache-Control "no-cache, no-store, must-revalidate" env=BITRIX_WIDGET
+    Header always set Pragma "no-cache" env=BITRIX_WIDGET
+    Header always set Expires "0" env=BITRIX_WIDGET
+    
+    # Para debugging - agregar header identificativo
+    Header always set X-Yeison-Widget "true" env=BITRIX_WIDGET
+    
+    # Headers normales SOLO cuando NO es widget
+    Header always set X-Frame-Options "SAMEORIGIN" env=!BITRIX_WIDGET
+    Header always set Access-Control-Allow-Origin "https://b24-mx8vza.bitrix24.com" env=!BITRIX_WIDGET
+    Header always set Access-Control-Allow-Methods "GET, POST, OPTIONS" env=!BITRIX_WIDGET
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization" env=!BITRIX_WIDGET
+    Header always set Access-Control-Max-Age "3600" env=!BITRIX_WIDGET
+</IfModule>
+
+# BLOQUEAR plugins de seguridad que puedan interferir
+<IfModule mod_rewrite.c>
+    # Prevenir que ciertos plugins bloqueen el widget
+    RewriteCond %{QUERY_STRING} yeison_widget= [OR]
+    RewriteCond %{QUERY_STRING} yeison_autologin=
+    RewriteRule ^(.*)$ - [E=SKIP_SECURITY:1]
+</IfModule>
+
+<IfModule mod_headers.c>
+    # Asegurar que no se bloquee por seguridad
+    SetEnvIf Query_String "yeison" SKIP_SECURITY
+    Header always unset X-Frame-Options env=SKIP_SECURITY
+    Header always set X-Frame-Options "ALLOWALL" env=SKIP_SECURITY
+</IfModule>
+
+# Permitir conexiones desde Bitrix24
+<IfModule mod_security.c>
+    SecRuleRemoveById 950120
+    SecRuleRemoveById 981173
+    
+    # Reglas específicas para widgets
+    SecRule REQUEST_URI "@contains yeison" \
+        "id:1001,\
+        phase:1,\
+        pass,\
+        nolog,\
+        ctl:ruleRemoveById=950120,\
+        ctl:ruleRemoveById=981173"
+</IfModule>
+
+# Forzar procesamiento especial para autologin
+<IfModule mod_rewrite.c>
+    RewriteCond %{QUERY_STRING} yeison_autologin=
+    RewriteRule ^(.*)$ /$1? [E=FORCE_NO_CACHE:1,E=BITRIX_WIDGET:1]
+</IfModule>
+
+# NUEVA SECCIÓN: Headers específicos para diferentes tipos de petición
+<IfModule mod_headers.c>
+    # Para peticiones AJAX de widget
+    SetEnvIf HTTP_X_REQUESTED_WITH "XMLHttpRequest" AJAX_WIDGET
+    Header always unset X-Frame-Options env=AJAX_WIDGET
+    Header always set X-Frame-Options "ALLOWALL" env=AJAX_WIDGET
+    
+    # Para peticiones desde iframe
+    SetEnvIf HTTP_SEC_FETCH_DEST "iframe" IFRAME_REQUEST
+    Header always unset X-Frame-Options env=IFRAME_REQUEST
+    Header always set X-Frame-Options "ALLOWALL" env=IFRAME_REQUEST
+</IfModule>
+
+# BEGIN cPanel-generated php ini directives, do not edit
+# Manual editing of this file may result in unexpected behavior.
+# To make changes to this file, use the cPanel MultiPHP INI Editor (Home >> Software >> MultiPHP INI Editor)
+# For more information, read our documentation (https://go.cpanel.net/EA4ModifyINI)
+<IfModule php7_module>
+   php_flag display_errors Off
+   php_value max_execution_time 30
+   php_value max_input_time 60
+   php_value max_input_vars 1000
+   php_value memory_limit 128M
+   php_value post_max_size 128M
+   php_value session.gc_maxlifetime 1440
+   php_value session.save_path "/var/cpanel/php/sessions/ea-php70"
+   php_value upload_max_filesize 128M
+   php_flag zlib.output_compression Off
+</IfModule>
+<IfModule lsapi_module>
+   php_flag display_errors Off
+   php_value max_execution_time 30
+   php_value max_input_time 60
+   php_value max_input_vars 1000
+   php_value memory_limit 128M
+   php_value post_max_size 128M
+   php_value session.gc_maxlifetime 1440
+   php_value session.save_path "/var/cpanel/php/sessions/ea-php70"
+   php_value upload_max_filesize 128M
+   php_flag zlib.output_compression Off
+</IfModule>
+# END cPanel-generated php ini directives, do not edit
+
+
+
+

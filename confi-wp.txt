@@ -1,0 +1,99 @@
+
+
+// ============================================================================
+// CONFIGURACIÓN YEISON BTX WIDGET - CACHE Y OPTIMIZACIONES
+// ============================================================================
+
+/**
+ * CRÍTICO: Deshabilitar cache para widgets de Bitrix24
+ * Esto evita problemas de cache que impiden el funcionamiento correcto del widget
+ */
+if (isset($_GET['yeison_widget']) || 
+    isset($_GET['yeison_widget_autologin']) || 
+    strpos($_SERVER['REQUEST_URI'] ?? '', 'yeison') !== false ||
+    strpos($_SERVER['HTTP_REFERER'] ?? '', 'bitrix24') !== false) {
+    
+    // LiteSpeed Cache
+    define('LSCACHE_NO_CACHE', true);
+    
+    // WP Cache general
+    define('DONOTCACHEPAGE', true);
+    define('DONOTCACHEDB', true);
+    define('DONOTMINIFY', true);
+    define('DONOTCDN', true);
+    
+    // W3 Total Cache
+    define('DONOTCACHEOBJECT', true);
+    define('DONOTCACHEPAGE', true);
+    
+    // WP Super Cache
+    define('WPSC_BYPASS_CACHE', true);
+    
+    // WP Rocket
+    if (!defined('WP_ROCKET_WHITE_LABEL_FOOTPRINT')) {
+        define('DONOTROCKETOPTIMIZE', true);
+    }
+    
+    // Autoptimize
+    define('AUTOPTIMIZE_NO_AGGREGATION', true);
+    
+    // Cache general
+    if (!defined('WP_CACHE')) {
+        define('WP_CACHE', false);
+    }
+}
+
+/**
+ * Configuración para debugging del widget (opcional - solo desarrollo)
+ * Descomenta estas líneas solo si necesitas debug detallado
+ */
+/*
+if (isset($_GET['yeison_widget']) && defined('WP_DEBUG') && WP_DEBUG) {
+    define('WP_DEBUG_LOG', true);
+    define('WP_DEBUG_DISPLAY', false);
+    ini_set('log_errors', 1);
+    ini_set('error_log', WP_CONTENT_DIR . '/debug-yeison-widget.log');
+}
+*/
+
+/**
+ * Configuración de memoria y timeouts para widgets
+ * Ajusta según las necesidades de tu servidor
+ */
+if (isset($_GET['yeison_widget_autologin'])) {
+    // Aumentar límites para el proceso de autologin
+    if (!ini_get('memory_limit') || intval(ini_get('memory_limit')) < 256) {
+        ini_set('memory_limit', '256M');
+    }
+    
+    if (!ini_get('max_execution_time') || intval(ini_get('max_execution_time')) < 60) {
+        ini_set('max_execution_time', 60);
+    }
+}
+
+/**
+ * Headers de seguridad - configuración para iframe
+ * Solo aplicar cuando NO es widget para no interferir
+ */
+if (!isset($_GET['yeison_widget']) && 
+    !isset($_GET['yeison_widget_autologin']) && 
+    strpos($_SERVER['REQUEST_URI'] ?? '', 'yeison') === false) {
+    
+    // Aplicar headers de seguridad normales
+    if (!headers_sent()) {
+        header('X-Frame-Options: SAMEORIGIN');
+        header('X-Content-Type-Options: nosniff');
+        header('X-XSS-Protection: 1; mode=block');
+        header('Referrer-Policy: strict-origin-when-cross-origin');
+    }
+}
+
+// ============================================================================
+// FIN CONFIGURACIÓN YEISON BTX WIDGET
+// ============================================================================
+
+// Resto de tu configuración wp-config.php...
+
+
+
+
